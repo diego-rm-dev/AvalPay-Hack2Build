@@ -15,7 +15,10 @@ const main = async () => {
     const deploymentData = JSON.parse(fs.readFileSync(deploymentPath, "utf8"));
 
     const eERCAddress = deploymentData.contracts.encryptedERC;
-    const auditorPublicKeyAddress = "0x38332d73dC01548fC6710Acbbe8116516111781A" as any;
+    
+    // Usar la wallet 2 como auditor (ya está registrada)
+    const auditorWallet = await getWallet(2);
+    const auditorPublicKeyAddress = await auditorWallet.getAddress();
 
     const encryptedERC = await EncryptedERC__factory.connect(eERCAddress, deployer);
     let auditor: any;

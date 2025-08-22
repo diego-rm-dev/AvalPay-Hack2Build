@@ -1,8 +1,7 @@
-import { ethers, zkit } from "hardhat";
+import { ethers } from "hardhat";
 import * as fs from "fs";
 import * as path from "path";
-import { poseidon3 } from "poseidon-lite";
-import type { MintCircuit } from "../../generated-types/zkit";
+import { privateMint } from "../../test/helpers";
 import { deriveKeysFromUser } from "../../src/utils";
 
 const main = async () => {
@@ -92,8 +91,8 @@ Registering user with
         }
         console.log("✅ User keys verified");
         
-        // Get token ID (in standalone, token ID is 1)
-        const tokenId = 1n;
+        // Get token ID (in standalone, token ID is 0)
+        const tokenId = 0n;
         console.log("📋 Token ID:", tokenId.toString());
         
         // Convert mint amount to encrypted system units
@@ -102,93 +101,74 @@ Registering user with
         
         console.log(`✅ Mint amount: ${ethers.formatUnits(mintAmountBigInt, encryptedSystemDecimals)} encrypted units`);
         
-        // Generate mint hash using poseidon3
-        const chainId = await ethers.provider.getNetwork().then(net => net.chainId);
-        const mintHash = poseidon3([
-            BigInt(chainId),
-            formattedPrivateKey,
-            BigInt(userAddress),
+        // Get auditor's public key
+        const auditorPublicKey = await encryptedERC.auditorPublicKey();
+        const auditorPublicKeyArray = [BigInt(auditorPublicKey.x.toString()), BigInt(auditorPublicKey.y.toString())];
+        console.log("🔑 Auditor public key:", auditorPublicKeyArray.map(k => k.toString()));
+        
+        // Generate mint proof using helper function
+        console.log("🔐 Generating private mint proof...");
+        console.log("⏳ This may take a while...");
+        
+        const mintProof = await privateMint(
             mintAmountBigInt,
-        ]);
+            user.publicKey,
+            auditorPublicKeyArray
+        );
         
-        console.log("Chain ID:", chainId.toString());
-        console.log("Mint Hash:", mintHash.toString());
+        console.log("✅ Mint proof generated successfully");
         
-        // Generate proof using zkit
-        console.log("🔐 Generating mint proof using zkit...");
-        try {
-            // Get the mint circuit
-            const circuit = await zkit.getCircuit("MintCircuit");
-            const mintCircuit = circuit as unknown as MintCircuit;
-            
-            // Prepare inputs for the circuit
-            const input = {
-                SenderPrivateKey: formattedPrivateKey,
-                SenderPublicKey: [user.publicKey[0], user.publicKey[1]],
-                SenderAddress: BigInt(userAddress),
-                ChainID: BigInt(chainId),
-                MintAmount: mintAmountBigInt,
-                MintHash: mintHash,
-            };
-            
-            console.log("📋 Circuit inputs:", input);
-            
-            // Generate proof
-            const proof = await mintCircuit.generateProof(input);
-            console.log("✅ Proof generated successfully using zkit");
-            
-            // Generate calldata for the contract
-            const calldata = await mintCircuit.generateCalldata(proof);
-            console.log("✅ Calldata generated successfully");
-            
-            // Call the contract
-            console.log("📝 Minting in the contract...");
-            try {
-                const mintTx = await encryptedERC.mint(userAddress, tokenId, calldata);
-                await mintTx.wait();
-                
-                console.log("🎉 Mint successful!");
-                console.log("Transaction hash:", mintTx.hash);
-                
-                // Show updated balance
-                console.log("\n🔍 Checking updated balance...");
-                const [newEGCT] = await encryptedERC.balanceOf(userAddress, tokenId);
-                const newC1: [bigint, bigint] = [BigInt(newEGCT.c1.x.toString()), BigInt(newEGCT.c1.y.toString())];
-                const newC2: [bigint, bigint] = [BigInt(newEGCT.c2.x.toString()), BigInt(newEGCT.c2.y.toString())];
-                
-                // Import decryptEGCTBalance for balance check
-                const { decryptEGCTBalance } = await import("../../src/utils");
-                const newBalance = decryptEGCTBalance(formattedPrivateKey, newC1, newC2);
-                
-                console.log(`💰 New balance: ${ethers.formatUnits(newBalance, encryptedSystemDecimals)} PRIV`);
-                console.log(`📤 Amount minted: ${ethers.formatUnits(mintAmountBigInt, encryptedSystemDecimals)} PRIV`);
-                
-            } catch (contractError) {
-                console.error("❌ Contract error: ", contractError);
-                
-                // Extract contract error message
-                if (contractError instanceof Error) {
-                    const errorMessage = contractError.message;
-                    
-                    if (errorMessage.includes("execution reverted")) {
-                        const revertMatch = errorMessage.match(/reason: (.+)/);
-                        if (revertMatch) {
-                            console.error("❌ Contract revert reason:", revertMatch[1]);
-                        } else {
-                            console.error("❌ Contract execution reverted");
-                        }
-                    } else {
-                        console.error("❌ Contract error:", errorMessage);
+        // Debug the structure
+        console.log("🔍 Debug: mintProof type:", typeof mintProof);
+        console.log("🔍 Debug: mintProof structure:", mintProof);
+        console.log("🔍 Debug: mintProof keys:", Object.keys(mintProof));
+        
+        // Call the contract's privateMint function
+        console.log("📝 Submitting private mint to contract...");
+        
+        const mintTx = await encryptedERC.privateMint(
+            userAddress,
+            mintProof
+        );
+        
+        console.log("📝 Mint transaction sent:", mintTx.hash);
+        
+        const receipt = await mintTx.wait();
+        console.log("✅ Private mint transaction confirmed in block:", receipt?.blockNumber);
+        
+        console.log("🎉 Private mint completed successfully!");
+        console.log(`💰 Minted ${ethers.formatUnits(mintAmountBigInt, encryptedSystemDecimals)} PRIV tokens to user ${userAddress}`);
+        
+        // Show transaction details from events
+        if (receipt) {
+            const logs = receipt.logs;
+            for (const log of logs) {
+                try {
+                    const parsed = encryptedERC.interface.parseLog(log);
+                    if (parsed && parsed.name === "PrivateMint") {
+                        const [user, auditorPCT, auditorAddress] = parsed.args;
+                        console.log("\n📋 Mint Details:");
+                        console.log("  - User:", user);
+                        console.log("  - Auditor:", auditorAddress);
+                        console.log("  - Audit trail created for compliance");
                     }
+                } catch (e) {
+                    // Skip logs that can't be parsed by this contract
                 }
-                
-                throw contractError;
             }
-            
-        } catch (proofError) {
-            console.error("❌ Proof generation error:", proofError);
-            throw proofError;
         }
+        
+        console.log("\n🎯 Private Mint Summary:");
+        console.log(`   From: ${userAddress} (Contract Owner)`);
+        console.log(`   To: ${userAddress} (User)`);
+        console.log(`   Amount: ${ethers.formatUnits(mintAmountBigInt, encryptedSystemDecimals)} PRIV tokens`);
+        console.log(`   Transaction: ${mintTx.hash}`);
+        console.log(`   Status: Privately minted (encrypted on-chain)`);
+        
+        console.log("\n💡 Next Steps:");
+        console.log("   • Check encrypted balance: npx hardhat run scripts/standalone/06_check_balance_dynamic.ts --network fuji");
+        console.log("   • Transfer privately: npx hardhat run scripts/standalone/07_transfer_dynamic.ts --network fuji");
+        console.log("   • Burn tokens: npx hardhat run scripts/standalone/08_burn_dynamic.ts --network fuji");
         
     } catch (error) {
         console.error("❌ Error during mint:");

@@ -139,8 +139,8 @@ Registering user with
         }
         console.log("✅ Sender keys verified");
         
-        // Get token ID (in standalone, token ID is 1)
-        const tokenId = 1n;
+        // Get token ID (in standalone, token ID is 0)
+        const tokenId = 0n;
         console.log("📋 Token ID:", tokenId.toString());
         
         // Get sender's current encrypted balance

@@ -1,8 +1,7 @@
-import { ethers, zkit } from "hardhat";
+import { ethers } from "hardhat";
 import * as fs from "fs";
 import * as path from "path";
-import { poseidon3 } from "poseidon-lite";
-import type { BurnCircuit } from "../../generated-types/zkit";
+import { privateBurn } from "../../test/helpers";
 import { i0, decryptEGCTBalance, createUserFromPrivateKey } from "../../src/utils";
 
 const main = async () => {
@@ -71,6 +70,10 @@ const main = async () => {
         const userPublicKey = await registrar.getUserPublicKey(userAddress);
         console.log("🔑 User public key:", [userPublicKey[0].toString(), userPublicKey[1].toString()]);
         
+        // Get auditor's public key from contract
+        const auditorPublicKey = await encryptedERC.auditorPublicKey();
+        console.log("🔑 Auditor public key:", [auditorPublicKey[0].toString(), auditorPublicKey[1].toString()]);
+        
         // Generate user's private key from signature
         const message = `eERC
 Registering user with
@@ -92,8 +95,8 @@ Registering user with
         }
         console.log("✅ User keys verified");
         
-        // Get token ID (in standalone, token ID is 1)
-        const tokenId = 1n;
+        // Get token ID (in standalone, token ID is 0)
+        const tokenId = 0n;
         console.log("📋 Token ID:", tokenId.toString());
         
         // Get user's current encrypted balance
@@ -125,90 +128,92 @@ Registering user with
         
         console.log(`✅ Burn amount: ${ethers.formatUnits(burnAmountBigInt, encryptedSystemDecimals)} encrypted units`);
         
-        // Generate burn hash using poseidon3
-        const chainId = await ethers.provider.getNetwork().then(net => net.chainId);
-        const burnHash = poseidon3([
-            BigInt(chainId),
-            userPrivateKey,
-            BigInt(userAddress),
+        // Prepare data for burn proof generation
+        const userEncryptedBalance = [c1[0], c1[1], c2[0], c2[1]];
+        const auditorPublicKeyArray = [BigInt(auditorPublicKey[0].toString()), BigInt(auditorPublicKey[1].toString())];
+        
+        console.log("🔐 Generating burn proof...");
+        console.log("⏳ This may take a while...");
+        
+        // Generate burn proof using the helper function
+        const { proof, userBalancePCT } = await privateBurn(
+            user,
+            userCurrentBalance,
             burnAmountBigInt,
-        ]);
+            userEncryptedBalance,
+            auditorPublicKeyArray
+        );
         
-        console.log("Chain ID:", chainId.toString());
-        console.log("Burn Hash:", burnHash.toString());
+        console.log("✅ Burn proof generated successfully");
         
-        // Generate proof using zkit
-        console.log("🔐 Generating burn proof using zkit...");
-        try {
-            // Get the burn circuit
-            const circuit = await zkit.getCircuit("BurnCircuit");
-            const burnCircuit = circuit as unknown as BurnCircuit;
-            
-            // Prepare inputs for the circuit
-            const input = {
-                SenderPrivateKey: userPrivateKey,
-                SenderPublicKey: [user.publicKey[0], user.publicKey[1]],
-                SenderAddress: BigInt(userAddress),
-                ChainID: BigInt(chainId),
-                BurnAmount: burnAmountBigInt,
-                BurnHash: burnHash,
-            };
-            
-            console.log("📋 Circuit inputs:", input);
-            
-            // Generate proof
-            const proof = await burnCircuit.generateProof(input);
-            console.log("✅ Proof generated successfully using zkit");
-            
-            // Generate calldata for the contract
-            const calldata = await burnCircuit.generateCalldata(proof);
-            console.log("✅ Calldata generated successfully");
-            
-            // Call the contract
-            console.log("📝 Burning in the contract...");
-            try {
-                const burnTx = await encryptedERC.burn(userAddress, tokenId, calldata);
-                await burnTx.wait();
-                
-                console.log("🎉 Burn successful!");
-                console.log("Transaction hash:", burnTx.hash);
-                
-                // Show updated balance
-                console.log("\n🔍 Checking updated balance...");
-                const [newEGCT] = await encryptedERC.balanceOf(userAddress, tokenId);
-                const newC1: [bigint, bigint] = [BigInt(newEGCT.c1.x.toString()), BigInt(newEGCT.c1.y.toString())];
-                const newC2: [bigint, bigint] = [BigInt(newEGCT.c2.x.toString()), BigInt(newEGCT.c2.y.toString())];
-                const newBalance = decryptEGCTBalance(userPrivateKey, newC1, newC2);
-                
-                console.log(`💰 New balance: ${ethers.formatUnits(newBalance, encryptedSystemDecimals)} PRIV`);
-                console.log(`📤 Amount burned: ${ethers.formatUnits(burnAmountBigInt, encryptedSystemDecimals)} PRIV`);
-                
-            } catch (contractError) {
-                console.error("❌ Contract error: ", contractError);
-                
-                // Extract contract error message
-                if (contractError instanceof Error) {
-                    const errorMessage = contractError.message;
-                    
-                    if (errorMessage.includes("execution reverted")) {
-                        const revertMatch = errorMessage.match(/reason: (.+)/);
-                        if (revertMatch) {
-                            console.error("❌ Contract revert reason:", revertMatch[1]);
-                        } else {
-                            console.error("❌ Contract execution reverted");
-                        }
-                    } else {
-                        console.error("❌ Contract error:", errorMessage);
+        // Debug the proof structure
+        console.log("🔍 Debug: burn proof structure:", proof);
+        
+        // Use the proof directly (since privateBurn returns the correct calldata format)
+        const burnProof = proof;
+        
+        console.log("📝 Submitting burn to contract...");
+        
+        // Call the contract's privateBurn function
+        const burnTx = await encryptedERC.privateBurn(
+            burnProof,
+            userBalancePCT
+        );
+        
+        console.log("📝 Burn transaction sent:", burnTx.hash);
+        
+        const receipt = await burnTx.wait();
+        console.log("✅ Burn transaction confirmed in block:", receipt?.blockNumber);
+        
+        console.log("🎉 Private burn completed successfully!");
+        
+        // Show transaction details from events
+        if (receipt) {
+            const logs = receipt.logs;
+            for (const log of logs) {
+                try {
+                    const parsed = encryptedERC.interface.parseLog(log);
+                    if (parsed && parsed.name === "PrivateBurn") {
+                        const [user, auditorPCT, auditorAddress] = parsed.args;
+                        console.log("\n📋 Burn Details:");
+                        console.log("  - User:", user);
+                        console.log("  - Auditor:", auditorAddress);
+                        console.log("  - Audit trail created for compliance");
                     }
+                } catch (e) {
+                    // Skip logs that can't be parsed by this contract
                 }
-                
-                throw contractError;
             }
-            
-        } catch (proofError) {
-            console.error("❌ Proof generation error:", proofError);
-            throw proofError;
         }
+        
+        // Show updated balance
+        console.log("\n🔍 Checking updated balance...");
+        
+        // Get user's new balance
+        const [newEGCT] = await encryptedERC.balanceOf(userAddress, tokenId);
+        const newC1: [bigint, bigint] = [BigInt(newEGCT.c1.x.toString()), BigInt(newEGCT.c1.y.toString())];
+        const newC2: [bigint, bigint] = [BigInt(newEGCT.c2.x.toString()), BigInt(newEGCT.c2.y.toString())];
+        
+        // Check if new balance is empty
+        const isNewEGCTEmpty = newC1[0] === 0n && newC1[1] === 0n && newC2[0] === 0n && newC2[1] === 0n;
+        let userNewBalance = 0n;
+        if (!isNewEGCTEmpty) {
+            userNewBalance = decryptEGCTBalance(userPrivateKey, newC1, newC2);
+        }
+        
+        console.log(`💰 User's new balance: ${ethers.formatUnits(userNewBalance, encryptedSystemDecimals)} PRIV`);
+        console.log(`🔥 Amount burned: ${ethers.formatUnits(burnAmountBigInt, encryptedSystemDecimals)} PRIV`);
+        
+        console.log("\n🎯 Burn Summary:");
+        console.log(`   User: ${userAddress}`);
+        console.log(`   Amount burned: ${ethers.formatUnits(burnAmountBigInt, encryptedSystemDecimals)} PRIV tokens`);
+        console.log(`   Remaining balance: ${ethers.formatUnits(userNewBalance, encryptedSystemDecimals)} PRIV tokens`);
+        console.log(`   Transaction: ${burnTx.hash}`);
+        console.log(`   Status: Tokens permanently destroyed (burned)`);
+        
+        console.log("\n💡 Next Steps:");
+        console.log("   • Check updated balance: npx hardhat run scripts/standalone/06_check_balance_dynamic.ts --network fuji");
+        console.log("   • Mint more tokens: npx hardhat run scripts/standalone/05_mint_dynamic.ts --network fuji");
         
     } catch (error) {
         console.error("❌ Error during burn:");

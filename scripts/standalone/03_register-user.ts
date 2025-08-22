@@ -8,7 +8,7 @@ import { getWallet, deriveKeysFromUser } from "../../src/utils";
 const main = async () => {
     // Configure which wallet to use: 1 for first signer, 2 for second signer
     // Can be overridden with environment variable: WALLET_NUMBER=1 or WALLET_NUMBER=2
-    const WALLET_NUMBER = 1;
+    const WALLET_NUMBER = 2;
     
     const wallet = await getWallet(WALLET_NUMBER);
     const userAddress = await wallet.getAddress();

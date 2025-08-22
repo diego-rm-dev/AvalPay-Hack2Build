@@ -103,8 +103,9 @@ function App() {
         cacheUtils.setLocal('wallet_address', address);
         cacheUtils.setSession('is_connected', true);
         
-        // Check registration status
+        // Check registration status for both systems
         checkRegistration(address);
+        checkRegistrationStandalone(address);
         
         // Change to overview
         setCurrentView('overview');
@@ -231,17 +232,6 @@ function App() {
     setLoading(true);
     setMessage('🔄 Actualizando balance...');
     
-    const cacheKey = `balance_${walletAddress}`;
-    const cached = cacheUtils.getMemory(cacheKey) || cacheUtils.getSession(cacheKey);
-    
-    if (cached && (Date.now() - cached.timestamp) < 120000) { // 2 minutes
-      setBalance(cached.value.public);
-      setPrivateBalance(cached.value.private);
-      setMessage('✅ Balance actualizado (desde caché)');
-      setLoading(false);
-      return;
-    }
-    
     try {
       const response = await fetch('/api/check-balance', {
         method: 'POST',
@@ -253,12 +243,6 @@ function App() {
       if (data.success) {
         setBalance(data.balance);
         setPrivateBalance(data.privateBalance);
-        
-        // Cache result
-        const balanceData = { public: data.balance, private: data.privateBalance };
-        cacheUtils.setMemory(cacheKey, balanceData);
-        cacheUtils.setSession(cacheKey, balanceData);
-        
         setMessage('✅ Balance actualizado exitosamente');
         addToHistory('Verificar Balance', true);
       } else {
@@ -417,6 +401,244 @@ function App() {
     }
   }, [walletAddress]);
 
+  // ===== FUNCIONES STANDALONE =====
+  
+  // Check registration status (Standalone)
+  const checkRegistrationStandalone = useCallback(async (address) => {
+    if (!address) return;
+    
+    const cacheKey = `registration_standalone_${address}`;
+    const cached = cacheUtils.getMemory(cacheKey) || cacheUtils.getSession(cacheKey);
+    
+    if (cached && (Date.now() - cached.timestamp) < 300000) { // 5 minutes
+      setIsRegistered(cached.value);
+      return;
+    }
+    
+    try {
+      const response = await fetch('http://localhost:3002/api/check-registration', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ address })
+      });
+      
+      const data = await response.json();
+      setIsRegistered(data.isRegistered);
+      
+      // Cache result
+      cacheUtils.setMemory(cacheKey, data.isRegistered);
+      cacheUtils.setSession(cacheKey, data.isRegistered);
+    } catch (error) {
+      console.error('Error checking registration (standalone):', error);
+    }
+  }, []);
+
+  // Register user (Standalone)
+  const registerUserStandalone = useCallback(async () => {
+    if (!walletAddress) {
+      setMessage('Conecta tu wallet primero');
+      return;
+    }
+    
+    setLoading(true);
+    setMessage('Registrando usuario en sistema standalone...');
+    
+    try {
+      const response = await fetch('http://localhost:3002/api/register-user', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ address: walletAddress })
+      });
+      
+      const data = await response.json();
+      
+      if (data.success) {
+        setMessage('✅ Usuario registrado exitosamente en sistema standalone');
+        setIsRegistered(true);
+        addToHistory('Registro Standalone', true);
+        
+        // Invalidate registration cache
+        const cacheKey = `registration_standalone_${walletAddress}`;
+        if (window.memoryCache) window.memoryCache.delete(cacheKey);
+        sessionStorage.removeItem(cacheKey);
+      } else {
+        setMessage('❌ Error: ' + data.message);
+        addToHistory('Registro Standalone', false);
+      }
+    } catch (error) {
+      setMessage('❌ Error: ' + error.message);
+      addToHistory('Registro Standalone', false);
+    } finally {
+      setLoading(false);
+    }
+  }, [walletAddress]);
+
+  // Check balance (Standalone)
+  const checkBalanceStandalone = useCallback(async () => {
+    if (!walletAddress) {
+      setMessage('❌ Conecta tu wallet primero');
+      return;
+    }
+    
+    setLoading(true);
+    setMessage('🔄 Actualizando balance standalone...');
+    
+    try {
+      const response = await fetch('http://localhost:3002/api/check-balance', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ address: walletAddress })
+      });
+      const data = await response.json();
+      
+      if (data.success) {
+        setPrivateBalance(data.balance);
+        setMessage('✅ Balance standalone actualizado exitosamente');
+        addToHistory('Verificar Balance Standalone', true);
+      } else {
+        setMessage('❌ Error: ' + data.message);
+        addToHistory('Verificar Balance Standalone', false);
+      }
+    } catch (error) {
+      console.error('Error checking balance (standalone):', error);
+      setMessage('❌ Error al verificar balance standalone: ' + error.message);
+      addToHistory('Verificar Balance Standalone', false);
+    } finally {
+      setLoading(false);
+    }
+  }, [walletAddress]);
+
+  // Mint tokens (Standalone)
+  const mintTokens = useCallback(async () => {
+    const mintAmount = document.getElementById('mint-amount')?.value || '';
+    if (!walletAddress || !mintAmount) {
+      setMessage('Conecta tu wallet y especifica un monto');
+      return;
+    }
+    
+    setLoading(true);
+    setMessage('Acuñando tokens...');
+    
+    try {
+      const response = await fetch('http://localhost:3002/api/mint', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ address: walletAddress, amount: mintAmount })
+      });
+      
+      const data = await response.json();
+      
+              if (data.success) {
+          setMessage('✅ Tokens acuñados exitosamente');
+          addToHistory('Mint', true);
+          if (document.getElementById('mint-amount')) {
+            document.getElementById('mint-amount').value = '';
+          }
+          
+          checkBalanceStandalone(); // Refresh balance
+        } else {
+        setMessage('❌ Error: ' + data.message);
+        addToHistory('Mint', false);
+      }
+    } catch (error) {
+      setMessage('❌ Error: ' + error.message);
+      addToHistory('Mint', false);
+    } finally {
+      setLoading(false);
+    }
+  }, [walletAddress]);
+
+  // Transfer tokens (Standalone)
+  const transferTokensStandalone = useCallback(async () => {
+    const transferAmount = document.getElementById('transfer-amount-standalone')?.value || '';
+    const toAddress = document.getElementById('transfer-to-standalone')?.value || '';
+    
+    if (!walletAddress || !transferAmount || !toAddress) {
+      setMessage('❌ Completa todos los campos requeridos');
+      return;
+    }
+    
+    const isValidAddress = /^0x[a-fA-F0-9]{40}$/.test(toAddress);
+    if (!isValidAddress) {
+      setMessage('❌ Dirección destino inválida');
+      return;
+    }
+    
+    setLoading(true);
+    setMessage('Transferiendo tokens...');
+    
+    try {
+      const response = await fetch('http://localhost:3002/api/transfer', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ from: walletAddress, to: toAddress, amount: transferAmount })
+      });
+      
+      const data = await response.json();
+      
+              if (data.success) {
+          setMessage('✅ Transferencia realizada exitosamente');
+          addToHistory('Transferencia Standalone', true);
+          if (document.getElementById('transfer-amount-standalone')) {
+            document.getElementById('transfer-amount-standalone').value = '';
+          }
+          if (document.getElementById('transfer-to-standalone')) {
+            document.getElementById('transfer-to-standalone').value = '';
+          }
+          
+          checkBalanceStandalone(); // Refresh balance
+        } else {
+        setMessage('❌ Error: ' + data.message);
+        addToHistory('Transferencia Standalone', false);
+      }
+    } catch (error) {
+      setMessage('❌ Error: ' + error.message);
+      addToHistory('Transferencia Standalone', false);
+    } finally {
+      setLoading(false);
+    }
+  }, [walletAddress]);
+
+  // Burn tokens (Standalone)
+  const burnTokens = useCallback(async () => {
+    const burnAmount = document.getElementById('burn-amount')?.value || '';
+    if (!walletAddress || !burnAmount) {
+      setMessage('Conecta tu wallet y especifica un monto');
+      return;
+    }
+    
+    setLoading(true);
+    setMessage('Quemando tokens...');
+    
+    try {
+      const response = await fetch('http://localhost:3002/api/burn', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ address: walletAddress, amount: burnAmount })
+      });
+      
+      const data = await response.json();
+      
+              if (data.success) {
+          setMessage('✅ Tokens quemados exitosamente');
+          addToHistory('Burn', true);
+          if (document.getElementById('burn-amount')) {
+            document.getElementById('burn-amount').value = '';
+          }
+          
+          checkBalanceStandalone(); // Refresh balance
+        } else {
+        setMessage('❌ Error: ' + data.message);
+        addToHistory('Burn', false);
+      }
+    } catch (error) {
+      setMessage('❌ Error: ' + error.message);
+      addToHistory('Burn', false);
+    } finally {
+      setLoading(false);
+    }
+  }, [walletAddress]);
+
   // Add to history (kept single definition; moved earlier above)
 
   // Clear cache
@@ -424,15 +646,17 @@ function App() {
     // Clear memory cache
     if (window.memoryCache) window.memoryCache.clear();
     
-    // Clear session storage
+    // Clear session storage (only registration cache, balance cache removed)
     Object.keys(sessionStorage).forEach(key => {
-      if (key.includes('balance_') || key.includes('registration_')) {
+      if (key.includes('registration_')) {
         sessionStorage.removeItem(key);
       }
     });
     
-    setMessage('✅ Cache limpiado');
+    setMessage('✅ Cache de registro limpiado');
   }, []);
+
+
 
   // Función simple para validar inputs numéricos sin re-renderizado
   const handleAmountChange = useCallback((e) => {
@@ -449,11 +673,17 @@ function App() {
   // Auto-refresh balance
   useEffect(() => {
     if (isConnected && walletAddress) {
+      // Solo verificar balance una vez al conectar
       checkBalance();
-      const interval = setInterval(checkBalance, 30000); // Every 30 seconds
+      checkBalanceStandalone();
+      
+      // Configurar intervalo solo para balance del converter
+      const interval = setInterval(() => {
+        checkBalance();
+      }, 30000); // Every 30 seconds
       return () => clearInterval(interval);
     }
-  }, [isConnected, walletAddress, checkBalance]);
+  }, [isConnected, walletAddress, checkBalance, checkBalanceStandalone]);
 
   // Load cached data on mount
   useEffect(() => {
@@ -468,6 +698,12 @@ function App() {
     if (cachedConnected && cachedConnected.value) {
       setIsConnected(true);
       setCurrentView('overview');
+      
+      // Check registration status for both systems if wallet is cached
+      if (cachedAddress) {
+        checkRegistration(cachedAddress.value);
+        checkRegistrationStandalone(cachedAddress.value);
+      }
     }
     
     if (cachedHistory) {
@@ -708,34 +944,100 @@ function App() {
 
   // Standalone Page Component
   const StandalonePage = () => (
-    <div className="native-page">
-      <div className="coming-soon">
-        <div className="coming-soon-icon">⚡</div>
+    <div className="standalone-page">
+      <div className="page-header">
         <h2>eERC Standalone</h2>
-        <p>Próximamente - Tokens nativos encriptados con capacidades de mint/burn</p>
-        
-        <div className="features-preview">
-          <div className="feature-preview-item">
-            <div className="feature-preview-icon">🪙</div>
-            <h4>Mint Tokens</h4>
-            <p>Crear nuevos tokens encriptados</p>
+        <p>Tokens nativos encriptados con capacidades de mint/burn</p>
+      </div>
+      
+      <div className="standalone-content">
+        {/* Registration */}
+        <div className="operation-group">
+          <h3>Registro</h3>
+          {!isRegistered ? (
+            <button onClick={registerUserStandalone} disabled={loading} className="operation-button primary">
+              {loading ? 'Registrando...' : 'Registrar Usuario'}
+            </button>
+          ) : (
+            <div className="status-success">✅ Usuario registrado</div>
+          )}
+        </div>
+
+        {/* Balance */}
+        <div className="operation-group">
+          <h3>Balance</h3>
+          <div className="balance-info">
+            <p>Balance PRIV: {privateBalance || '0'} PRIV</p>
           </div>
-          <div className="feature-preview-item">
-            <div className="feature-preview-icon">🔥</div>
-            <h4>Burn Tokens</h4>
-            <p>Destruir tokens existentes</p>
-          </div>
-          <div className="feature-preview-item">
-            <div className="feature-preview-icon">🔄</div>
-            <h4>Transfer Privada</h4>
-            <p>Transferencias anónimas</p>
+                     <button onClick={checkBalanceStandalone} disabled={loading} className="operation-button secondary">
+             {loading ? 'Actualizando...' : 'Actualizar Balance'}
+           </button>
+        </div>
+
+        {/* Mint */}
+        <div className="operation-group">
+          <h3>Mint Tokens</h3>
+          <p className="operation-note">⚠️ Solo el propietario del contrato puede acuñar tokens</p>
+          <div className="input-group">
+            <input
+              id="mint-amount"
+              type="text"
+              placeholder="Cantidad (ej: 100)"
+              onChange={handleAmountChange}
+              className="input-field"
+            />
+            <button onClick={mintTokens} disabled={loading} className="operation-button primary">
+              {loading ? 'Acuñando...' : 'Acuñar Tokens'}
+            </button>
           </div>
         </div>
-        
-        <button className="notify-button">
-          <span>🔔</span>
-          Notificarme cuando esté disponible
-        </button>
+
+        {/* Transfer */}
+        <div className="operation-group">
+          <h3>Transferencia Privada</h3>
+          <div className="input-section">
+            <div className="input-group">
+              <label>Dirección destino</label>
+              <input
+                id="transfer-to-standalone"
+                type="text"
+                placeholder="0x..."
+                className="input-field"
+              />
+            </div>
+            <div className="input-group">
+              <label>Cantidad</label>
+              <input
+                id="transfer-amount-standalone"
+                type="text"
+                placeholder="Cantidad (ej: 50)"
+                onChange={handleAmountChange}
+                className="input-field"
+              />
+            </div>
+          </div>
+          <button onClick={transferTokensStandalone} disabled={loading} className="operation-button primary">
+            {loading ? 'Transferiendo...' : 'Transferir'}
+          </button>
+        </div>
+
+        {/* Burn */}
+        <div className="operation-group">
+          <h3>Burn Tokens</h3>
+          <p className="operation-note">🔥 Quemar tokens los destruye permanentemente</p>
+          <div className="input-group">
+            <input
+              id="burn-amount"
+              type="text"
+              placeholder="Cantidad (ej: 25)"
+              onChange={handleAmountChange}
+              className="input-field"
+            />
+            <button onClick={burnTokens} disabled={loading} className="operation-button danger">
+              {loading ? 'Quemando...' : 'Quemar Tokens'}
+            </button>
+          </div>
+        </div>
       </div>
     </div>
   );

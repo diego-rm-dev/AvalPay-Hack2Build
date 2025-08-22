@@ -191,7 +191,7 @@ app.post('/api/check-registration', async (req, res) => {
     console.log('Verificando registro para:', address);
     
     // Usar script dinámico de verificación de balance para verificar registro
-    const scriptPath = path.join(__dirname, '../scripts/standalone/06_check-balance.ts');
+    const scriptPath = path.join(__dirname, '../scripts/standalone/06_check_balance_dynamic.ts');
     
     const output = await runHardhatCommand(scriptPath, { address });
     
@@ -238,7 +238,7 @@ app.post('/api/register-user', async (req, res) => {
     console.log('Registrando usuario:', address);
     
     // Usar script dinámico de registro
-    const scriptPath = path.join(__dirname, '../scripts/standalone/03_register-user.ts');
+    const scriptPath = path.join(__dirname, '../scripts/standalone/03_register_user_dynamic.ts');
     
     const output = await runHardhatCommand(scriptPath, { address });
     
@@ -291,7 +291,7 @@ app.post('/api/check-balance', async (req, res) => {
     console.log('Verificando balance para:', address);
     
     // Usar script dinámico de verificación de balance
-    const scriptPath = path.join(__dirname, '../scripts/standalone/06_check-balance.ts');
+    const scriptPath = path.join(__dirname, '../scripts/standalone/06_check_balance_dynamic.ts');
     
     const output = await runHardhatCommand(scriptPath, { address });
     
@@ -356,7 +356,7 @@ app.post('/api/mint', async (req, res) => {
     console.log('Acuñando tokens para:', address, 'monto:', amount);
     
     // Usar script dinámico de mint
-    const scriptPath = path.join(__dirname, '../scripts/standalone/05_mint.ts');
+    const scriptPath = path.join(__dirname, '../scripts/standalone/05_mint_dynamic.ts');
     
     const output = await runHardhatCommand(scriptPath, { address, amount });
     
@@ -404,7 +404,7 @@ app.post('/api/transfer', async (req, res) => {
     console.log('Transferencia de:', address, 'a:', toAddress, 'monto:', amount);
     
     // Usar script dinámico de transferencia
-    const scriptPath = path.join(__dirname, '../scripts/standalone/07_transfer.ts');
+    const scriptPath = path.join(__dirname, '../scripts/standalone/07_transfer_dynamic.ts');
     
     const output = await runHardhatCommand(scriptPath, { address, amount, toAddress });
     
@@ -450,7 +450,7 @@ app.post('/api/burn', async (req, res) => {
     console.log('Quemando tokens para:', address, 'monto:', amount);
     
     // Usar script dinámico de burn
-    const scriptPath = path.join(__dirname, '../scripts/standalone/08_burn.ts');
+    const scriptPath = path.join(__dirname, '../scripts/standalone/08_burn_dynamic.ts');
     
     const output = await runHardhatCommand(scriptPath, { address, amount });
     
