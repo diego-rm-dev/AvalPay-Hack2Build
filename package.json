@@ -4,7 +4,7 @@
   "main": "index.js",
   "scripts": {
     "test": "echo \"Error: no test specified\" && exit 1",
-	"postinstall": "npx hardhat compile & npx hardhat zkit make --force && npx hardhat zkit verifiers",
+	"postinstall": "npx hardhat compile & npx hardhat zkit make --force && npx hardhat zkit verifiers && node fix-imports.js",
 	"zkit:setup": "node compile-and-fix.js",
 	"zkit:fix": "node fix-imports.js",
 	"register": "node register-user.js",
@@ -16,6 +16,7 @@
 	"simple": "node start-simple-system.js",
     "dynamic": "node start-dynamic-system.js",
     "optimized": "node start-optimized-system.js",
+    "standalone": "node start-standalone-system.js",
 	"converter:init": "npx hardhat run scripts/converter/01_deploy-basics.ts --network fuji",
 	"converter:core": "npx hardhat run scripts/converter/02_deploy-converter.ts --network fuji",
 	"converter:register": "npx hardhat run scripts/converter/03_register-user.ts --network fuji",

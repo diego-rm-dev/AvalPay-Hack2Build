@@ -223,7 +223,13 @@ function App() {
 
   // Check balance
   const checkBalance = useCallback(async () => {
-    if (!walletAddress) return;
+    if (!walletAddress) {
+      setMessage('❌ Conecta tu wallet primero');
+      return;
+    }
+    
+    setLoading(true);
+    setMessage('🔄 Actualizando balance...');
     
     const cacheKey = `balance_${walletAddress}`;
     const cached = cacheUtils.getMemory(cacheKey) || cacheUtils.getSession(cacheKey);
@@ -231,6 +237,8 @@ function App() {
     if (cached && (Date.now() - cached.timestamp) < 120000) { // 2 minutes
       setBalance(cached.value.public);
       setPrivateBalance(cached.value.private);
+      setMessage('✅ Balance actualizado (desde caché)');
+      setLoading(false);
       return;
     }
     
@@ -242,17 +250,27 @@ function App() {
       });
       const data = await response.json();
       
-             if (data.success) {
-         setBalance(data.balance);
-         setPrivateBalance(data.privateBalance);
-         
-         // Cache result
-         const balanceData = { public: data.balance, private: data.privateBalance };
-         cacheUtils.setMemory(cacheKey, balanceData);
-         cacheUtils.setSession(cacheKey, balanceData);
-       }
+      if (data.success) {
+        setBalance(data.balance);
+        setPrivateBalance(data.privateBalance);
+        
+        // Cache result
+        const balanceData = { public: data.balance, private: data.privateBalance };
+        cacheUtils.setMemory(cacheKey, balanceData);
+        cacheUtils.setSession(cacheKey, balanceData);
+        
+        setMessage('✅ Balance actualizado exitosamente');
+        addToHistory('Verificar Balance', true);
+      } else {
+        setMessage('❌ Error: ' + data.message);
+        addToHistory('Verificar Balance', false);
+      }
     } catch (error) {
       console.error('Error checking balance:', error);
+      setMessage('❌ Error al verificar balance: ' + error.message);
+      addToHistory('Verificar Balance', false);
+    } finally {
+      setLoading(false);
     }
   }, [walletAddress]);
 
@@ -610,7 +628,7 @@ function App() {
             <p>Balance privado: {privateBalance || '0'} eAVAXTEST</p>
           </div>
           <button onClick={checkBalance} disabled={loading} className="operation-button secondary">
-            Actualizar Balance
+            {loading ? 'Actualizando...' : 'Actualizar Balance'}
           </button>
         </div>
 
