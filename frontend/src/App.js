@@ -16,6 +16,12 @@ function App() {
   const [isRegistered, setIsRegistered] = useState(false);
   const [operationHistory, setOperationHistory] = useState([]);
   
+  // Dark mode state
+  const [isDarkMode, setIsDarkMode] = useState(() => {
+    const saved = localStorage.getItem('darkMode');
+    return saved ? JSON.parse(saved) : window.matchMedia('(prefers-color-scheme: dark)').matches;
+  });
+  
   // Refs para mantener el foco en los inputs
   const depositInputRef = useRef(null);
   const transferAmountInputRef = useRef(null);
@@ -54,6 +60,15 @@ function App() {
       }
       throw error;
     }
+  }, []);
+
+  // Dark mode toggle function
+  const toggleTheme = useCallback(() => {
+    setIsDarkMode(prev => {
+      const newMode = !prev;
+      localStorage.setItem('darkMode', JSON.stringify(newMode));
+      return newMode;
+    });
   }, []);
 
   // Cache utilities
@@ -1189,7 +1204,7 @@ function App() {
   );
 
   return (
-    <div className="App">
+    <div className="App" data-theme={isDarkMode ? 'dark' : 'light'}>
       {/* Sidebar */}
       <div className={`sidebar ${sidebarOpen ? 'open' : ''}`}>
         <div className="sidebar-header">
@@ -1265,6 +1280,10 @@ function App() {
               {currentView === 'converter' && 'eERC Converter'}
               {currentView === 'standalone' && 'eERC Standalone'}
             </h1>
+            
+            <button className="theme-toggle" onClick={toggleTheme} title="Cambiar tema">
+              {isDarkMode ? '☀️' : '🌙'}
+            </button>
             
             {!isConnected && currentView !== 'landing' && (
               <button className="connect-wallet-btn" onClick={connectWallet}>
